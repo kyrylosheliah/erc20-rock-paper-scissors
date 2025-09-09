@@ -6,7 +6,7 @@ import type { RockPaperScissors } from "../types/ethers-contracts/RockPaperSciss
 const conn = await network.connect();
 const { ethers } = conn;
 
-describe("RockPaperScissors with RPSToken", function () {
+describe("RPSToken: RockPaperScissors contract", function () {
   let token: RPSToken;
   let rps: RockPaperScissors;
   let deployer: any;
@@ -102,14 +102,14 @@ describe("RockPaperScissors with RPSToken", function () {
     expect(await token.balanceOf(bob.address)).to.equal(parse("1000"));
   });
 
-  it("should revert invalid reveals", async () => {
+  it("reverts invalid reveals", async () => {
     const stake = parse("10");
 
-    const { salt: aliceSalt, commit: aliceCommit } = makeCommit(2);
+    const { commit: aliceCommit } = makeCommit(2);
     await token.connect(alice).approve(rps.target, stake);
     await rps.connect(alice).challengeDuel(bob.address, stake, aliceCommit);
 
-    const { salt: bobSalt, commit: bobCommit } = makeCommit(2);
+    const { commit: bobCommit } = makeCommit(2);
     await token.connect(bob).approve(rps.target, stake);
     await rps.connect(bob).acceptDuel(1, bobCommit);
 
