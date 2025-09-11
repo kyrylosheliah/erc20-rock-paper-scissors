@@ -56,7 +56,7 @@ describe("VoteableTradeableChargeableToken", function () {
     expect(votingActive).to.equal(true);
 
     const roundId = await token.votingRoundId();
-    expect(roundId).to.equal(0);
+    expect(roundId).to.equal(1);
   });
 
   it("prevents users below 0.05% from voting", async function () {

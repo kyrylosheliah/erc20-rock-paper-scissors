@@ -18,23 +18,36 @@ import "./IChargeable.sol";
 contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, IChargeable {
 
     // ---------------
+    // IVoteable types
+    // ---------------
+
+    // [account]
+    struct Vote {
+        uint256 roundId;
+        uint256 price;
+    }
+    // voteCasted => vote.roundId == votingRoundId
+
+    // [priceValue]
+    struct VotingPrice {
+        uint256 roundId;
+        uint256 weight;
+    }
+    // priceExists => price.roundId == votingRoundId
+
+    // ---------------
     // IVoteable state
     // ---------------
 
-    /// @notice `votingRoundId` to `voter` to `voted`
-    mapping(uint256 => mapping(address => bool)) public voteCasted;
+    /// @notice `accountAddress` to {Vote}
+    mapping(address => Vote) public votes;
 
-    /// @notice `votingRoundId` to `price` to `weight`
-    mapping(uint256 => mapping(uint256 => uint256)) public priceWeights;
+    /// @notice `priceValue` to {VotingPrice}
+    mapping(uint256 => VotingPrice) public prices;
 
-    /// @notice `votingRoundId` to `price` to `exists`
-    mapping(uint256 => mapping(uint256 => bool)) public priceExists;
+    uint256 public votingPriceWinnerWeight;
 
-    /// @notice `votingRoundId` to `priceId` to `priceValue`
-    mapping(uint256 => mapping(uint256 => uint256)) public prices;
-
-    /// @notice `votingRoundId` to `votingPriceCount`
-    mapping(uint256 => uint256) public priceCounts;
+    uint256 public votingPriceWinner;
 
     uint256 public votingRoundId;
 
@@ -73,7 +86,7 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @dev Modifier to revert if `msg.sender` voted in the current round
     modifier voteEmpty(address voter, string memory message) {
         if (votingActive) {
-            bool voted = voteCasted[votingRoundId][voter];
+            bool voted = votes[voter].roundId == votingRoundId;
             require(!voted, message);
         }
         _;
@@ -139,8 +152,11 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         uint256 threshold = totalSupply / 1000;
         require(balances[msg.sender] >= threshold, "not enough tokens");
 
-        votingActive = true;
+        votingPriceWinnerWeight = 0;
+        votingPriceWinner = 0;
         votingTimestamp = block.timestamp;
+        ++votingRoundId;
+        votingActive = true;
 
         _castVote(msg.sender, price);
 
@@ -167,36 +183,14 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         require(votingActive, "voting is not active");
         require(block.timestamp >= votingTimestamp + votingTimeoutSeconds, "voting did not time out");
 
-        uint256 bestPrice = 0;
-        uint256 bestWeight = 0;
+        uint256 winnerWeight = votingPriceWinnerWeight;
+        uint256 winnerPrice = votingPriceWinner;
 
-        // iterate over all proposed prices for this round
-        uint256 votingPriceCount = priceCounts[votingRoundId];
-        for (uint256 i = 0; i < votingPriceCount; ++i) {
-            uint256 price = prices[votingRoundId][i];
-            uint256 weight = priceWeights[votingRoundId][price];
-            if (weight > bestWeight) {
-                bestWeight = weight;
-                bestPrice = price;
-            }
-        }
+        currentPrice = winnerPrice;
 
-        // update state
-        currentPrice = bestPrice;
         votingActive = false;
 
-        // Update voting rounds by overwriting values by ring buffer logic
-        ++votingRoundId;
-        if (votingRoundId >= 512) {
-            votingRoundId = 0;
-        }
-        priceCounts[votingRoundId] = 0;
-        // delete voteCasted[votingRoundId];
-        // delete priceWeights[votingRoundId];
-        // delete priceExists[votingRoundId];
-        // delete prices[votingRoundId];
-
-        emit VotingEnded(bestPrice, bestWeight, votingRoundId);
+        emit VotingEnded(winnerPrice, winnerWeight, votingRoundId);
     }
 
     // ---------------------
@@ -283,17 +277,30 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @dev Records a vote in the current round.
     function _castVote(address voter, uint256 price) internal {
-        uint256 weight = balances[voter];
-        uint256 votingPriceCount = priceCounts[votingRoundId];
 
-        voteCasted[votingRoundId][voter] = true;
-        priceWeights[votingRoundId][price] += weight;
-        bool exists = priceExists[votingRoundId][price];
-        if (!exists) {
-            prices[votingRoundId][votingPriceCount] = price;
+        /// @notice `accountAddress` to {Vote}
+        // mapping(address => Vote) public votes;
+        /// @notice `priceValue` to {VotingPrice}
+        // mapping(uint256 => VotingPrice) public prices;
+
+        uint256 weight = balances[voter];
+
+        votes[voter].price = price;
+        votes[voter].roundId = votingRoundId;
+
+        if (prices[price].roundId != votingRoundId) {
+            prices[price].weight = weight; // 0 + weight
+            prices[price].roundId = votingRoundId;
+        } else {
+            prices[price].weight += weight;
         }
 
-        ++priceCounts[votingRoundId];
+        uint256 accumulatedWeight = prices[price].weight;
+
+        if (accumulatedWeight > votingPriceWinnerWeight) {
+            votingPriceWinnerWeight = accumulatedWeight;
+            votingPriceWinner = price;
+        }
 
         emit Voted(voter, price, weight, votingRoundId);
     }
