@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import "./RPSToken.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -77,7 +76,7 @@ contract RockPaperScissors is ReentrancyGuard {
 
     /// @param token The IERC20 staking token
     /// @param revealTimeout Duel timeout in seconds
-    constructor(RPSToken token, uint256 revealTimeout) {
+    constructor(IERC20 token, uint256 revealTimeout) {
         _token = token;
         _revealTimeout = revealTimeout;
     }
