@@ -21,26 +21,17 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     // IVoteable types
     // ---------------
 
-    // [account]
-    struct Vote {
-        uint256 roundId;
-        uint256 price;
-    }
-    // voteCasted => vote.roundId == votingRoundId
-
-    // [priceValue]
     struct VotingPrice {
         uint256 roundId;
         uint256 weight;
     }
-    // priceExists => price.roundId == votingRoundId
 
     // ---------------
     // IVoteable state
     // ---------------
 
-    /// @notice `accountAddress` to {Vote}
-    mapping(address => Vote) public votes;
+    /// @notice `accountAddress` to `roundId`
+    mapping(address => uint256) public votes;
 
     /// @notice `priceValue` to {VotingPrice}
     mapping(uint256 => VotingPrice) public prices;
@@ -86,7 +77,7 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @dev Modifier to revert if `msg.sender` voted in the current round
     modifier voteEmpty(address voter, string memory message) {
         if (votingActive) {
-            bool voted = votes[voter].roundId == votingRoundId;
+            bool voted = votes[voter] == votingRoundId;
             require(!voted, message);
         }
         _;
@@ -277,16 +268,9 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @dev Records a vote in the current round.
     function _castVote(address voter, uint256 price) internal {
-
-        /// @notice `accountAddress` to {Vote}
-        // mapping(address => Vote) public votes;
-        /// @notice `priceValue` to {VotingPrice}
-        // mapping(uint256 => VotingPrice) public prices;
-
         uint256 weight = balances[voter];
 
-        votes[voter].price = price;
-        votes[voter].roundId = votingRoundId;
+        votes[voter] = votingRoundId;
 
         if (prices[price].roundId != votingRoundId) {
             prices[price].weight = weight; // 0 + weight
