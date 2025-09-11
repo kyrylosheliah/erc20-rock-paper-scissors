@@ -4,10 +4,6 @@
 
 ## Usage
 
-Start a local testnet chain on http://127.0.0.1:8545/
-```
-npx hardhat node
-```
 
 Compile the contract
 ```
@@ -27,7 +23,8 @@ npx hardhat test solidity
 npx hardhat test mocha
 ```
 
-Local chain deployment:
+Local chain deployment on http://127.0.0.1:8545/:
 ```
+npx hardhat node
 npx hardhat --network localhost ignition deploy ignition/modules/RockPaperScissors.ts
 ```

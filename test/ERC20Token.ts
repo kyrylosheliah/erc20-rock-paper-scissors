@@ -1,12 +1,12 @@
 import { expect } from "chai";
 import { network } from "hardhat";
-import type { RPSToken } from "../types/ethers-contracts/RPSToken.js";
+import type { ERC20Token } from "../types/ethers-contracts/ERC20Token.js";
 
 const conn = await network.connect();
 const { ethers } = conn;
 
-describe("RPSToken: IERC20 implementation)", function () {
-  let token: RPSToken;
+describe("ERC20Token: IERC20 token implementation", function () {
+  let token: ERC20Token;
   let deployer: any;
   let alice: any;
   let bob: any;
@@ -17,8 +17,8 @@ describe("RPSToken: IERC20 implementation)", function () {
 
     [deployer, alice, bob] = await ethers.getSigners();
 
-    const TokenFactory = await ethers.getContractFactory("RPSToken");
-    token = (await TokenFactory.deploy("Rock Paper Scissors Token", "RPS")) as RPSToken;
+    const Factory = await ethers.getContractFactory("ERC20Token");
+    token = (await Factory.deploy("Rock Paper Scissors Token", "RPS")) as ERC20Token;
     await token.waitForDeployment();
   });
 
