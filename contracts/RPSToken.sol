@@ -6,80 +6,83 @@ import "./IBurnable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-
+/// @title RPSToken - An ERC20 token with role-based access control
+/// @author
+/// @notice Implements IERC20, IBurnable, role-restricted minting.
 contract RPSToken is IERC20, AccessControl, IMintable, IBurnable {
 
-    string public name;
-    string public symbol;
-    uint8 public decimals = 18;
+    string private _name;
 
-    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    string private _symbol;
+
+    uint8 private _decimals = 18;
+
+    bytes32 private constant _MINTER_ROLE = keccak256("MINTER_ROLE");
 
     uint256 private _totalSupply;
+
     mapping(address => uint256) private _balances;
+
     mapping(address => mapping(address => uint256)) private _allowances;
 
-    constructor(string memory _name, string memory _symbol) {
-        name = _name;
-        symbol = _symbol;
+    /// @param name The name of the token (e.g., "Rock Paper Scissors Token")
+    /// @param symbol The symbol of the token (e.g., "RPS")
+    constructor(string memory name, string memory symbol) {
+        _name = name;
+        _symbol = symbol;
         // Grant the deployer the default admin role and minter role
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(MINTER_ROLE, msg.sender);
+        _grantRole(_MINTER_ROLE, msg.sender);
     }
 
-    function mint(address _to, uint256 _amount) public {
-        require(hasRole(MINTER_ROLE, msg.sender), "the caller is not a minter");
-        _mint(_to, _amount);
+    // -------------------
+    // Minting and burning
+    // -------------------
+
+    /// @notice Mint new tokens and assign them to a specified address
+    /// @param to The recipient of the minted tokens
+    /// @param amount The number of tokens to mint
+    function mint(address to, uint256 amount) public {
+        require(hasRole(_MINTER_ROLE, msg.sender), "the caller is not a minter");
+        _mint(to, amount);
     }
 
+    /// @notice Burn (destroy) tokens from the caller's balance
+    /// @param amount The number of tokens to burn
     function burn(uint256 amount) external {
         _burn(msg.sender, amount);
     }
 
+    // ---------------------
     // IERC20 implementation
+    // ---------------------
 
-    // // @dev Emitted when `value` tokens are moved
+    /// @inheritdoc IERC20
     // event Transfer(address indexed from, address indexed to, uint256 value);
 
-    // // @dev Emitted when the allowance of a `spender` approved by an `owner`
+    /// @inheritdoc IERC20
     // event Approval(address indexed owner, address indexed spender, uint256 value);
 
-    // @dev Returns the value of tokens in existence.
-    function totalSupply() external view returns (uint256) {
-        return _totalSupply;
-    }
-
-    // @dev Returns the value of tokens owned by `account`.
-    function balanceOf(address account) external view returns (uint256) {
-        return _balances[account];
-    }
-
-    // @dev Moves amount of tokens, returns a success boolean.
-    // Emits a {Transfer} event.
+    /// @inheritdoc IERC20
     function transfer(address to, uint256 value) external returns (bool) {
         _transfer(msg.sender, to, value);
         return true;
     }
 
-    // @dev Returns the remaining allowed spending on behalf of `owner`
-    // This value changes when {approve} or {transferFrom} are called.
-    function allowance(address owner, address spender) external view returns (uint256) {
-        return _allowances[owner][spender];
-    }
-
-    // @dev Sets a allowance of `spender`. Returns a success boolean.
-    // IMPORTANT: Beware that changing an allowance with this method brings the
-    // risk of race condition for both the old and the new allowance use.
-    // (reduce the old first?)
-    // Emits an {Approval} event.
+    /// @inheritdoc IERC20
     function approve(address spender, uint256 value) external returns (bool) {
+        // Solution 1?
+        _allowances[msg.sender][spender] = 0;
+        // A race condition here:
         _allowances[msg.sender][spender] = value;
+        // Solution 2?
+        // Change the interpretation of this operation interface to:
+        // _allowances[msg.sender][spender] += value;
         emit Approval(msg.sender, spender, value);
         return true;
     }
 
-    // @dev Moves a tokens using the allowance mechanism.
-    // Emits a {Transfer} event.
+    /// @inheritdoc IERC20
     function transferFrom(address from, address to, uint256 value) external returns (bool) {
         uint256 currentAllowance = _allowances[from][msg.sender];
         require(currentAllowance >= value, "transfer exceeds allowance");
@@ -89,36 +92,65 @@ contract RPSToken is IERC20, AccessControl, IMintable, IBurnable {
         return true;
     }
 
+    /// @inheritdoc IERC20
+    function totalSupply() external view returns (uint256) {
+        return _totalSupply;
+    }
+
+    /// @inheritdoc IERC20
+    function balanceOf(address account) external view returns (uint256) {
+        return _balances[account];
+    }
+
+    /// @inheritdoc IERC20
+    function allowance(address owner, address spender) external view returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
+    // ---------------------
     // Internal functions
+    // ---------------------
 
-    function _mint(address _to, uint256 _amount) internal {
-        require(_to != address(0), "mint to zero address");
+    /// @dev Internal function to mint tokens to an account
+    /// @notice Mints from `address(0)`
+    /// @param to The recipient of minted tokens
+    /// @param amount The number of tokens to mint
+    function _mint(address to, uint256 amount) internal {
+        require(to != address(0), "mint to zero address");
 
-        _totalSupply += _amount;
-        _balances[_to] += _amount;
+        _balances[to] += amount;
+        _totalSupply += amount;
 
-        emit Transfer(address(0), _to, _amount);
+        emit Transfer(address(0), to, amount);
     }
 
-    function _burn(address _account, uint256 _amount) internal {
-        require(_account != address(0), "burn from zero address");
-        require(_balances[_account] >= _amount, "burn exceeds balance");
+    /// @dev Internal function to burn tokens from an account
+    /// @notice Burns to `address(0)`
+    /// @param account The address whose tokens will be burned
+    /// @param amount The number of tokens to burn
+    function _burn(address account, uint256 amount) internal {
+        require(account != address(0), "burn from zero address");
+        require(_balances[account] >= amount, "burn exceeds balance");
 
-        _balances[_account] -= _amount;
-        _totalSupply -= _amount;
+        _balances[account] -= amount;
+        _totalSupply -= amount;
 
-        emit Transfer(_account, address(0), _amount);
+        emit Transfer(account, address(0), amount);
     }
 
-    function _transfer(address _from, address _to, uint256 amount) internal {
-        require(_from != address(0), "transfer from zero address");
-        require(_to != address(0), "transfer to zero address");
-        require(_balances[_from] >= amount, "insufficient balance");
+    /// @dev Internal function to transfer tokens between accounts
+    /// @param from The address sending tokens
+    /// @param to The recipient address
+    /// @param amount The number of tokens to transfer
+    function _transfer(address from, address to, uint256 amount) internal {
+        require(from != address(0), "transfer from zero address");
+        require(to != address(0), "transfer to zero address");
+        require(_balances[from] >= amount, "insufficient balance");
 
-        _balances[_from] -= amount;
-        _balances[_to] += amount;
+        _balances[from] -= amount;
+        _balances[to] += amount;
 
-        emit Transfer(_from, _to, amount);
+        emit Transfer(from, to, amount);
     }
 
 }

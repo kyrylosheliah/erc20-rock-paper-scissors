@@ -5,7 +5,6 @@ import type { RPSToken } from "../types/ethers-contracts/RPSToken.js";
 const conn = await network.connect();
 const { ethers } = conn;
 
-
 describe("RPSToken: IERC20 implementation)", function () {
   let token: RPSToken;
   let deployer: any;
@@ -27,6 +26,8 @@ describe("RPSToken: IERC20 implementation)", function () {
     // revert snapshot to clean state
     await conn.provider.request({ method: "evm_revert", params: [snapshotId] });
   });
+
+  // TODO: expect().to.emit()
 
   it("mints tokens correctly", async () => {
     await token.mint(alice.address, ethers.parseEther("100"));
