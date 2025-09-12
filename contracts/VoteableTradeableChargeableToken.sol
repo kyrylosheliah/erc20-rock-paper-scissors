@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import "./ERC20Token.sol";
-import "./IVoteable.sol";
-import "./ITradeable.sol";
-import "./IChargeable.sol";
+import "./interfaces/IVoteable.sol";
+import "./interfaces/ITradeable.sol";
+import "./interfaces/IChargeable.sol";
 
 /// @title VoteableTradeableChargeableToken
 /// @author
@@ -21,7 +21,7 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     // IVoteable types
     // ---------------
 
-    struct VotingPrice {
+    struct VotingPriceWeightAccumulator {
         uint256 roundId;
         uint256 weight;
     }
@@ -30,25 +30,21 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     // IVoteable state
     // ---------------
 
-    /// @notice `accountAddress` to `roundId`
-    mapping(address => uint256) public votes;
+    mapping(address => uint256) public voterToRound;
 
-    /// @notice `priceValue` to {VotingPrice}
-    mapping(uint256 => VotingPrice) public prices;
+    mapping(uint256 => VotingPriceWeightAccumulator) public priceToAccumulator;
 
-    uint256 public votingPriceWinnerWeight;
+    uint256 public votingWinnerWeight;
 
-    uint256 public votingPriceWinner;
+    uint256 public votingWinnerPrice;
 
-    uint256 public votingRoundId;
+    uint256 public currentVotingRoundId;
 
     uint256 public votingTimestamp;
 
     bool public votingActive;
 
     uint256 public votingTimeoutSeconds;
-
-    uint256 public votingHistorySize;
 
     uint256 public currentPrice;
 
@@ -77,8 +73,8 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @dev Modifier to revert if `msg.sender` voted in the current round
     modifier voteEmpty(address voter, string memory message) {
         if (votingActive) {
-            bool voted = votes[voter] == votingRoundId;
-            require(!voted, message);
+            bool noVoteThisRound = voterToRound[voter] != currentVotingRoundId;
+            require(noVoteThisRound, message);
         }
         _;
     }
@@ -89,11 +85,10 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
     /// @param symbol_ The symbol of the token (e.g., "RPS")
-    constructor(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_, uint256 votingHistorySize_)
+    constructor(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_)
         ERC20Token(name_, symbol_)
     {
         votingTimeoutSeconds = votingTimeoutSeconds_;
-        votingHistorySize = votingHistorySize_;
         feeBurnTimestamp = block.timestamp;
     }
 
@@ -136,32 +131,32 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @notice Start a new voting with an initial `price`.
     /// @dev Voter is deemed eligible to start by holding at least 0.1% of the token supply.
-    /// @param price Price in wei per token units (10**decimals).
+    /// @param price Price in wei per token units (10**decimals) of token unit per TOKEN.
     function startVoting(uint256 price) external {
         require(!votingActive, "voting is already active");
 
-        uint256 threshold = totalSupply / 1000;
+        uint256 threshold = totalSupply / 1000; // 0.1% is 0.001
         require(balances[msg.sender] >= threshold, "not enough tokens");
 
-        votingPriceWinnerWeight = 0;
-        votingPriceWinner = 0;
+        votingWinnerWeight = 0;
+        votingWinnerPrice = 0;
         votingTimestamp = block.timestamp;
-        ++votingRoundId;
+        ++currentVotingRoundId;
         votingActive = true;
 
         _castVote(msg.sender, price);
 
-        emit VotingStarted(msg.sender, votingTimestamp, votingRoundId);
+        emit VotingStarted(msg.sender, votingTimestamp, currentVotingRoundId);
     }
 
     /// @notice Vote in the current round
     /// @dev Voter is deemed eligible to vote by holding at least 0.05% of the token supply.
     /// Voting is available once per round and blocks the trade interface.
-    /// @param price Price in wei per token units (10**decimals)
+    /// @param price Price in wei per token units (10**decimals of token unit per TOKEN)
     function vote(uint256 price) external voteEmpty(msg.sender, "already voted") {
         require(votingActive, "no voting");
 
-        uint256 threshold = totalSupply / 2000;
+        uint256 threshold = totalSupply / 2000; // 0.05% is 0.0005
         require(balances[msg.sender] >= threshold, "not enough tokens");
 
         _castVote(msg.sender, price);
@@ -174,14 +169,14 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         require(votingActive, "voting is not active");
         require(block.timestamp >= votingTimestamp + votingTimeoutSeconds, "voting did not time out");
 
-        uint256 winnerWeight = votingPriceWinnerWeight;
-        uint256 winnerPrice = votingPriceWinner;
+        uint256 winnerWeight = votingWinnerWeight;
+        uint256 winnerPrice = votingWinnerPrice;
 
         currentPrice = winnerPrice;
 
         votingActive = false;
 
-        emit VotingEnded(winnerPrice, winnerWeight, votingRoundId);
+        emit VotingEnded(winnerPrice, winnerWeight, currentVotingRoundId);
     }
 
     // ---------------------
@@ -220,41 +215,51 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @notice Buy tokens with attached ETH.
     /// Voters cannot be buyers to prevent balance-weighted insider trading.
     /// Emits a {Bought} event.
-    /// @dev `currentPrice` is in wei per token unit (10**decimals)
+    /// @dev `currentPrice` is in wei per token unit (10**decimals of token unit per TOKEN)
     function buy() external payable voteEmpty(msg.sender, "sender voted") {
         require(msg.value > 0, "insufficient payment");
         require(currentPrice > 0, "price not set");
 
+        // wei/eth: 10**18
+        // - suppose price or wei/tokenUnit is 10**14
+        //   then per 1 wei of ETHEREUM sold you get 10**4 or 10_000 token units of TOKEN
+        // - suppose price or wei/tokenUnit is 10**22
+        //   then per 10**4 or 10_000 wei of ETHEREUM sold you get 1 token unit of TOKEN
         uint256 tokens = (msg.value * (10 ** decimals)) / currentPrice;
         uint256 fee = (tokens * buyingFeeBP) / 10000;
-        uint256 net = tokens - fee;
+        uint256 tokenPurchasedAmount = tokens - fee;
 
-        _mint(msg.sender, net);
+        _mint(msg.sender, tokenPurchasedAmount);
         if (fee > 0) {
             _mint(address(this), fee);
             feeBalance += fee;
         }
 
-        emit Bought(msg.sender, msg.value, net);
+        emit Bought(msg.sender, msg.value, tokenPurchasedAmount);
     }
 
     /// @notice Sell `amount` of tokens for ETH from the contract balance.
     /// Voters cannot be sellers to prevent balance-weighted insider trading.
     /// Emits a {Sold} event.
-    /// @param amount is in wei per token unit (10**decimals)
+    /// @param amount is in wei per token unit (10**decimals of token unit per TOKEN)
     function sell(uint256 amount) external voteEmpty(msg.sender, "sender voted") {
         require(amount > 0, "zero amount");
         require(currentPrice > 0, "price not set");
 
         _burn(msg.sender, amount);
         uint256 fee = (amount * sellingFeeBP) / 10000;
-        uint256 net = amount - fee;
+        uint256 tokenSoldAmount = amount - fee;
         if (fee > 0) {
             _mint(address(this), fee);
             feeBalance += fee;
         }
 
-        uint256 ethAmount = (net * currentPrice) / (10 ** decimals);
+        // wei/eth: 10**18
+        // - suppose price or wei/tokenUnit is 10**14
+        //   then per [10**4 or 10_000] token units of TOKEN sold you get 1 wei of ETHEREUM
+        // - suppose price or wei/tokenUnit is 10**22
+        //   then per 1 token unit of TOKEN sold you get [10**4 or 10_000] wei of ETHEREUM
+        uint256 ethAmount = (tokenSoldAmount * currentPrice) / (10 ** decimals);
         require(address(this).balance >= ethAmount, "insufficient ETH");
 
         payable(msg.sender).transfer(ethAmount);
@@ -268,24 +273,22 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @dev Records a vote in the current round.
     function _castVote(address voter, uint256 price) internal {
+        voterToRound[voter] = currentVotingRoundId;
+
         uint256 weight = balances[voter];
-
-        votes[voter] = votingRoundId;
-
-        if (prices[price].roundId != votingRoundId) {
-            prices[price].weight = weight; // 0 + weight
-            prices[price].roundId = votingRoundId;
+        if (priceToAccumulator[price].roundId != currentVotingRoundId) {
+            priceToAccumulator[price].weight = weight; // 0 + weight
+            priceToAccumulator[price].roundId = currentVotingRoundId;
         } else {
-            prices[price].weight += weight;
+            priceToAccumulator[price].weight += weight;
         }
 
-        uint256 accumulatedWeight = prices[price].weight;
-
-        if (accumulatedWeight > votingPriceWinnerWeight) {
-            votingPriceWinnerWeight = accumulatedWeight;
-            votingPriceWinner = price;
+        uint256 accumulatedWeight = priceToAccumulator[price].weight;
+        if (accumulatedWeight > votingWinnerWeight) {
+            votingWinnerWeight = accumulatedWeight;
+            votingWinnerPrice = price;
         }
 
-        emit Voted(voter, price, weight, votingRoundId);
+        emit Voted(voter, price, weight, currentVotingRoundId);
     }
 }

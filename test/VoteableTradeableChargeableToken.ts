@@ -23,8 +23,7 @@ describe("VoteableTradeableChargeableToken", function () {
 
     const Factory = await ethers.getContractFactory("VoteableTradeableChargeableToken");
     votingTimeoutSeconds = 60;
-    const votingHistorySize = 512;
-    token = await Factory.connect(deployer).deploy("Vote Token", "VTC", votingTimeoutSeconds, votingHistorySize);
+    token = await Factory.connect(deployer).deploy("Vote Token", "VTC", votingTimeoutSeconds);
     await token.waitForDeployment();
     tokenContractAddress = token.getAddress();
 
@@ -55,7 +54,7 @@ describe("VoteableTradeableChargeableToken", function () {
     const votingActive = await token.votingActive();
     expect(votingActive).to.equal(true);
 
-    const roundId = await token.votingRoundId();
+    const roundId = await token.currentVotingRoundId();
     expect(roundId).to.equal(1);
   });
 
