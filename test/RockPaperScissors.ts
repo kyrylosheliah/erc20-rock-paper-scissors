@@ -1,13 +1,13 @@
 import { expect } from "chai";
 import { network } from "hardhat";
-import type { ERC20Token } from "../types/ethers-contracts/ERC20Token.js";
+import type { ERC20 } from "../types/ethers-contracts/ERC20.js";
 import type { RockPaperScissors } from "../types/ethers-contracts/RockPaperScissors.js";
 
 const conn = await network.connect();
 const { ethers } = conn;
 
 describe("RockPaperScissors: an IERC20-based contract", function () {
-  let token: ERC20Token;
+  let token: ERC20;
   let rps: RockPaperScissors;
   let deployer: any;
   let alice: any;
@@ -19,7 +19,7 @@ describe("RockPaperScissors: an IERC20-based contract", function () {
 
     [deployer, alice, bob] = await ethers.getSigners();
 
-    const Factory = await ethers.getContractFactory("ERC20Token");
+    const Factory = await ethers.getContractFactory("ERC20");
     token = await Factory.connect(deployer).deploy("Rock Paper Scissors Token", "RPS");
     await token.waitForDeployment();
 
