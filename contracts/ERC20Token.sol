@@ -11,6 +11,16 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Implements IERC20, IBurnable, role-restricted IMintable.
 contract ERC20Token is IERC20, AccessControl, IMintable, IBurnable {
 
+    // --------------------
+    // initialization state
+    // --------------------
+
+    bool private _ERC20TokenInitialized;
+
+    // -----------
+    // Token state
+    // -----------
+
     string public name;
 
     string public symbol;
@@ -45,10 +55,14 @@ contract ERC20Token is IERC20, AccessControl, IMintable, IBurnable {
 
     /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
     /// @param symbol_ The symbol of the token (e.g., "RPS")
-    constructor(string memory name_, string memory symbol_) {
+    function _ERC20TokenInitialize(string memory name_, string memory symbol_) internal {
+        require(!_ERC20TokenInitialized, "already initialized");
+
+        _ERC20TokenInitialized = true;
+
         name = name_;
         symbol = symbol_;
-        // Grant the deployer the default admin role and minter role
+
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MINTER_ROLE, msg.sender);
     }

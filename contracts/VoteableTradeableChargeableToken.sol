@@ -6,6 +6,12 @@ import "./interfaces/IVoteable.sol";
 import "./interfaces/ITradeable.sol";
 import "./interfaces/IChargeable.sol";
 
+// TODO: deployment code
+// new UpgradeableProxy(address(implV1), msg.sender, abi.encodeWithSignature(
+//     "initialize(string,string,uint256,uint256)",
+//     "Rock Paper Scissors Token", "RPS", 3600, 10
+// ));
+
 /// @title VoteableTradeableChargeableToken
 /// @author
 /// @notice Implements IERC20, IBurnable, IMintable, IVoteable, IChargeable, ITradeable. Some methods are
@@ -16,6 +22,11 @@ import "./interfaces/IChargeable.sol";
 /// - Votes are weighted by `balances[voter]`
 /// - Transfers / buy / sell are forbidden for addresses that have voted in current round.
 contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, IChargeable {
+    // --------------------
+    // initialization state
+    // --------------------
+
+    bool private _VoteableTradeableChargeableTokenInitialized;
 
     // ---------------
     // IVoteable types
@@ -61,10 +72,10 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     // ----------------
 
     /// @notice A basis point (in 0.01 percents)
-    uint256 public buyingFeeBP;
+    uint256 public buyingFeeBasePoints;
 
     /// @notice A basis point (in 0.01 percents)
-    uint256 public sellingFeeBP;
+    uint256 public sellingFeeBasePoints;
 
     // -------------------
     // IVoteable modifiers
@@ -85,9 +96,18 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
     /// @param symbol_ The symbol of the token (e.g., "RPS")
-    constructor(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_)
-        ERC20Token(name_, symbol_)
-    {
+    /// @param votingTimeoutSeconds_ Seconds until price voting deactivates
+    function VoteableTradeableChargeableTokenInitialize(
+        string memory name_,
+        string memory symbol_,
+        uint256 votingTimeoutSeconds_
+    ) public {
+        require(!_VoteableTradeableChargeableTokenInitialized, "already initialized");
+
+        _VoteableTradeableChargeableTokenInitialized = true;
+
+        _ERC20TokenInitialize(name_, symbol_);
+
         votingTimeoutSeconds = votingTimeoutSeconds_;
         feeBurnTimestamp = block.timestamp;
     }
@@ -189,7 +209,7 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         require(block.timestamp >= feeBurnTimestamp + 7 days, "can burn only once per 7 days");
 
         uint256 feeBalance_ = feeBalance;
-        require(feeBalance_ > 0, "fee pool is 0");
+        require(feeBalance_ > 0, "fee balance is 0");
 
         feeBalance = 0;
         _burn(address(this), feeBalance_);
@@ -204,12 +224,12 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
 
     /// @notice Set fee basis points.
     /// Emits a {TradeFeesUpdated}.
-    /// @param buyingFeeBP_ Buy fee basis points
-    /// @param sellingFeeBP_ Sell fee sell basis points
-    function setTradeFees(uint256 buyingFeeBP_, uint256 sellingFeeBP_) external onlyAdmins {
-        buyingFeeBP = buyingFeeBP_;
-        sellingFeeBP = sellingFeeBP_;
-        emit TradeFeesUpdated(buyingFeeBP_, sellingFeeBP_);
+    /// @param buyingFeeBasePoints_ Buying fee in basis points (0.01% per point)
+    /// @param sellingFeeBasePoints_ Selling fee in basis points (0.01% per point)
+    function setTradeFees(uint256 buyingFeeBasePoints_, uint256 sellingFeeBasePoints_) external onlyAdmins {
+        buyingFeeBasePoints = buyingFeeBasePoints_;
+        sellingFeeBasePoints = sellingFeeBasePoints_;
+        emit TradeFeesUpdated(buyingFeeBasePoints_, sellingFeeBasePoints_);
     }
 
     /// @notice Buy tokens with attached ETH.
@@ -226,7 +246,7 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         // - suppose price or wei/tokenUnit is 10**22
         //   then per 10**4 or 10_000 wei of ETHEREUM sold you get 1 token unit of TOKEN
         uint256 tokens = (msg.value * (10 ** decimals)) / currentPrice;
-        uint256 fee = (tokens * buyingFeeBP) / 10000;
+        uint256 fee = (tokens * buyingFeeBasePoints) / 10000;
         uint256 tokenPurchasedAmount = tokens - fee;
 
         _mint(msg.sender, tokenPurchasedAmount);
@@ -247,7 +267,7 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         require(currentPrice > 0, "price not set");
 
         _burn(msg.sender, amount);
-        uint256 fee = (amount * sellingFeeBP) / 10000;
+        uint256 fee = (amount * sellingFeeBasePoints) / 10000;
         uint256 tokenSoldAmount = amount - fee;
         if (fee > 0) {
             _mint(address(this), fee);
