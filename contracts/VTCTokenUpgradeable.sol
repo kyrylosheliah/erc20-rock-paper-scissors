@@ -8,14 +8,13 @@ import "./interfaces/IChargeable.sol";
 
 /// @title VTC: Voteable Tradeable Chargeable Token
 /// @author
-/// @notice Implements IERC20, IBurnable, IMintable, IVoteable, IChargeable, ITradeable. Some methods are
-/// role-restricted. Trade burns fees.
+/// @notice Some methods are role-restricted. Voting restricts trade. Trade burns fees.
 /// @dev Implementation notes:
 /// - Start voting threshold: 0.1% of `totalSupply`
 /// - Voting threshold to cast a vote: 0.05% of `totalSupply`
 /// - Votes are weighted by `balances[voter]`
 /// - Transfers / buy / sell are forbidden for addresses that have voted in the current round.
-contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable, ITradeable, IChargeable {
+contract VTCTokenUpgradeable is Initializable, UUPSUpgradeable, ERC20TokenUpgradeable, IVoteable, ITradeable, IChargeable {
     // ---------------
     // IVoteable state
     // ---------------
@@ -62,12 +61,18 @@ contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable,
 
     /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
     /// @param symbol_ The symbol of the token (e.g., "RPS")
+    /// @param decimals_ The number of digits treated as precision
     /// @param votingTimeoutSeconds_ Seconds until price voting deactivates
-    function VTCTokenInitialize(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_)
+    function VTCTokenInitialize(
+        string memory name_,
+        string memory symbol_,
+        uint8 decimals_,
+        uint256 votingTimeoutSeconds_
+    )
         public
         initializer
     {
-        __VTCToken__init(name_, symbol_, votingTimeoutSeconds_);
+        __VTCToken__init(name_, symbol_, decimals_, votingTimeoutSeconds_);
     }
 
     // ------------------
@@ -117,7 +122,7 @@ contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable,
             revert VotingActive();
         }
 
-        uint256 threshold = totalSupply / 1000; // 0.1% is 0.001
+        uint256 threshold = _totalSupply / 1000; // 0.1% is 0.001
         if (balances[msg.sender] < threshold) {
             revert InsufficientVotingBalance(threshold);
         }
@@ -128,9 +133,9 @@ contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable,
         ++currentVotingRoundId;
         votingActive = true;
 
-        _castVote(msg.sender, price);
-
         emit VotingStarted(msg.sender, votingTimestamp, currentVotingRoundId);
+
+        _castVote(msg.sender, price);
     }
 
     /// @notice Vote in the current round
@@ -144,7 +149,7 @@ contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable,
             revert AlreadyVoted();
         }
 
-        uint256 threshold = totalSupply / 2000; // 0.05% is 0.0005
+        uint256 threshold = _totalSupply / 2000; // 0.05% is 0.0005
         if (balances[msg.sender] < threshold) {
             revert InsufficientVotingBalance(threshold);
         }
@@ -288,9 +293,15 @@ contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable,
     // Internal functions
     // ------------------
 
-    function __VTCToken__init(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_) internal {
-        __AccessControl_init();
-        __ERC20Token_init(name_, symbol_);
+    function __VTCToken__init(
+        string memory name_,
+        string memory symbol_,
+        uint8 decimals_,
+        uint256 votingTimeoutSeconds_
+    )
+        internal
+    {
+        __ERC20Token_init(name_, symbol_, decimals_);
 
         votingTimeoutSeconds = votingTimeoutSeconds_;
         feeBurnTimestamp = block.timestamp;

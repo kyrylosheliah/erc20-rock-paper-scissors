@@ -26,7 +26,7 @@ describe("ERC20Token: IERC20 token implementation", function () {
     await logic.waitForDeployment();
     const initializeData = LogicFactory.interface.encodeFunctionData(
       "ERC20TokenInitialize",
-      [ "ERC20 Token", "ET"]
+      [ "ERC20 Token", "ET", 18 ]
     );
     const ProxyFactory = await ethers.getContractFactory("UpgradeableProxy");
     proxy = (await ProxyFactory.connect(deployer).deploy(logic.getAddress(), deployer.address, initializeData));

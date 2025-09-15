@@ -20,7 +20,7 @@ describe("RockPaperScissors: an IERC20-based contract", function () {
     [deployer, alice, bob] = await ethers.getSigners();
 
     const Factory = await ethers.getContractFactory("ERC20Token");
-    token = await Factory.connect(deployer).deploy("Rock Paper Scissors Token", "RPS");
+    token = await Factory.connect(deployer).deploy("Rock Paper Scissors Token", "RPS", 18);
     await token.waitForDeployment();
 
     const RPS = await ethers.getContractFactory("RockPaperScissors");

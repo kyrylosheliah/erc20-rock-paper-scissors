@@ -49,7 +49,7 @@ describe("VTCTokenUpgradeable", function () {
     await logic.waitForDeployment();
     const initializeData = LogicFactory.interface.encodeFunctionData(
       "VTCTokenInitialize",
-      [ "Voteable Tradeable Chargeable Token", "VTC", votingTimeoutSeconds ]
+      [ "Voteable Tradeable Chargeable Token", "VTC", 18, votingTimeoutSeconds ]
     );
     const ProxyFactory = await ethers.getContractFactory("UpgradeableProxy");
     proxy = (await ProxyFactory.connect(deployer).deploy(logic.getAddress(), deployer.address, initializeData));
@@ -77,7 +77,7 @@ describe("VTCTokenUpgradeable", function () {
   it("should change votingTimestamp, votingNumber with startVoting; emits VotingStarted", async function () {
     const price = ethers.parseEther("0.001");
 
-    await token.connect(alice).startVoting(price);
+    await expect(token.connect(alice).startVoting(price)).to.emit(token, "VotingStarted");
     console.log(`alice starts a voting with ${formatUnit(price)}`);
 
     expect(await token.votingActive()).to.equal(true);

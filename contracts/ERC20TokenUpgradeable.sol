@@ -7,6 +7,7 @@ import "./interfaces/IAccessControlErrors.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// @title An ERC20 token implementation with role-based access control
 /// @author
@@ -14,6 +15,7 @@ import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.so
 contract ERC20TokenUpgradeable is
     Initializable,
     AccessControlUpgradeable,
+    UUPSUpgradeable,
     IERC20,
     IERC20Errors,
     IAccessControlErrors,
@@ -28,11 +30,13 @@ contract ERC20TokenUpgradeable is
 
     string public symbol;
 
-    uint8 public decimals = 18;
+    uint8 public decimals;
 
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
-    uint256 public totalSupply;
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    uint256 internal _totalSupply;
 
     mapping(address => uint256) public balances;
 
@@ -60,10 +64,8 @@ contract ERC20TokenUpgradeable is
     // constructor
     // -----------
 
-    /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
-    /// @param symbol_ The symbol of the token (e.g., "RPS")
-    function ERC20TokenInitialize(string memory name_, string memory symbol_) public initializer {
-        __ERC20Token_init(name_, symbol_);
+    function ERC20TokenInitialize(string memory name_, string memory symbol_, uint8 decimals_) public initializer {
+        __ERC20Token_init(name_, symbol_, decimals_);
     }
 
     // ---------
@@ -108,9 +110,18 @@ contract ERC20TokenUpgradeable is
     }
 
     /// @inheritdoc IERC20
-    function transferFrom(address from, address to, uint256 value) public virtual returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 value
+    ) public virtual returns (bool) {
         uint256 currentAllowance = allowances[from][msg.sender];
-        if (currentAllowance < value) revert ERC20InsufficientAllowance(msg.sender, currentAllowance, value);
+        if (currentAllowance < value)
+            revert ERC20InsufficientAllowance(
+                msg.sender,
+                currentAllowance,
+                value
+            );
 
         allowances[from][msg.sender] = currentAllowance - value;
         _transfer(from, to, value);
@@ -118,11 +129,10 @@ contract ERC20TokenUpgradeable is
         return true;
     }
 
-    // already generated from a publicly declared totalSupply
     /// @inheritdoc IERC20
-    // function totalSupply() external view returns (uint256) {
-    //     return totalSupply;
-    // }
+    function totalSupply() external view override returns (uint256) {
+         return _totalSupply;
+    }
 
     /// @inheritdoc IERC20
     function balanceOf(address account) external view returns (uint256) {
@@ -130,15 +140,18 @@ contract ERC20TokenUpgradeable is
     }
 
     /// @inheritdoc IERC20
-    function allowance(address owner, address spender) external view returns (uint256) {
+    function allowance(
+        address owner,
+        address spender
+    ) external view returns (uint256) {
         return allowances[owner][spender];
     }
 
-    /// @inheritdoc IERC20
-    // event Transfer(address indexed from, address indexed to, uint256 value);
+    // --------
+    // UUPSUpgradeable internal
+    // --------
 
-    /// @inheritdoc IERC20
-    // event Approval(address indexed owner, address indexed spender, uint256 value);
+    function _authorizeUpgrade(address newImplementation) internal virtual override onlyAdmins {}
 
     // --------
     // Internal
@@ -146,9 +159,14 @@ contract ERC20TokenUpgradeable is
 
     /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
     /// @param symbol_ The symbol of the token (e.g., "RPS")
-    function __ERC20Token_init(string memory name_, string memory symbol_) internal {
+    /// @param decimals_ The number of digits treated as precision
+    function __ERC20Token_init(string memory name_, string memory symbol_, uint8 decimals_) internal {
         name = name_;
         symbol = symbol_;
+        decimals = decimals_;
+
+        __AccessControl_init();
+        __UUPSUpgradeable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MINTER_ROLE, msg.sender);
@@ -162,7 +180,7 @@ contract ERC20TokenUpgradeable is
         if (to == address(0)) revert ERC20InvalidReceiver(to);
 
         balances[to] += amount;
-        totalSupply += amount;
+        _totalSupply += amount;
 
         emit Transfer(address(0), to, amount);
     }
@@ -173,10 +191,11 @@ contract ERC20TokenUpgradeable is
     /// @param amount The number of tokens to burn
     function _burn(address account, uint256 amount) internal {
         if (account == address(0)) revert ERC20InvalidSender(account);
-        if (balances[account] < amount) revert ERC20InsufficientBalance(account, balances[account], amount);
+        if (balances[account] < amount)
+            revert ERC20InsufficientBalance(account, balances[account], amount);
 
         balances[account] -= amount;
-        totalSupply -= amount;
+        _totalSupply -= amount;
 
         emit Transfer(account, address(0), amount);
     }
@@ -188,12 +207,12 @@ contract ERC20TokenUpgradeable is
     function _transfer(address from, address to, uint256 amount) internal {
         if (from == address(0)) revert ERC20InvalidSender(from);
         if (to == address(0)) revert ERC20InvalidReceiver(to);
-        if (balances[from] < amount) revert ERC20InsufficientBalance(from, balances[from], amount);
+        if (balances[from] < amount)
+            revert ERC20InsufficientBalance(from, balances[from], amount);
 
         balances[from] -= amount;
         balances[to] += amount;
 
         emit Transfer(from, to, amount);
     }
-
 }
