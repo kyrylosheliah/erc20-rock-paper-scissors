@@ -1,16 +1,15 @@
 import { expect } from "chai";
 import { network } from "hardhat";
-import type { VoteableTradeableChargeableToken } from "../types/ethers-contracts/VoteableTradeableChargeableToken.js";
-import type { UpgradeableProxy } from "../types/ethers-contracts/UpgradeableProxy.js";
+import type { VTCTokenUpgradeable } from "../types/ethers-contracts/VTCTokenUpgradeable.ts";
+import type { UpgradeableProxy } from "../types/ethers-contracts/UpgradeableProxy.ts";
 
 const conn = await network.connect();
 const { ethers } = conn;
 
-describe("VoteableTradeableChargeableToken (proxy)", function () {
-  let token: VoteableTradeableChargeableToken;
+describe("VTCTokenUpgradeable", function () {
+  let token: VTCTokenUpgradeable;
   let tokenContractAddress: string;
   let proxy: UpgradeableProxy;
-  let proxyContractAddress: string;
   let votingTimeoutSeconds: number;
   let deployer: any;
   let alice: any;
@@ -36,17 +35,26 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
 
     votingTimeoutSeconds = 60;
 
-    const LogicFactory = await ethers.getContractFactory("VoteableTradeableChargeableToken");
+    // // Direct deployment
+    // const Factory = await ethers.getContractFactory("VTCTokenUpgradeable");
+    // token = await Factory.connect(deployer).deploy(
+    //   "Voteable Tradeable Chargeable Token", "VTC", votingTimeoutSeconds
+    // );
+    // await token.waitForDeployment();
+    // tokenContractAddress = token.getAddress();
+
+    // Upgradeable deployment
+    const LogicFactory = await ethers.getContractFactory("VTCTokenUpgradeable");
     const logic = await LogicFactory.connect(deployer).deploy();
     await logic.waitForDeployment();
     const initializeData = LogicFactory.interface.encodeFunctionData(
-      "VoteableTradeableChargeableTokenInitialize",
+      "VTCTokenInitialize",
       [ "Voteable Tradeable Chargeable Token", "VTC", votingTimeoutSeconds ]
     );
     const ProxyFactory = await ethers.getContractFactory("UpgradeableProxy");
     proxy = (await ProxyFactory.connect(deployer).deploy(logic.getAddress(), deployer.address, initializeData));
     await proxy.waitForDeployment();
-    proxyContractAddress = await proxy.getAddress();
+    const proxyContractAddress = await proxy.getAddress();
     token = LogicFactory.attach(proxyContractAddress);
     tokenContractAddress = await token.getAddress();
 
@@ -64,16 +72,7 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
     await conn.provider.request({ method: "evm_revert", params: [snapshotId] });
   });
 
-  it("should upgrade", async function () {
-    const LogicV2Factory = await ethers.getContractFactory("VoteableTradeableChargeableToken");
-    const logicV2 = await LogicV2Factory.connect(deployer).deploy();
-    await logicV2.waitForDeployment();
-    await proxy.connect(deployer).upgradeTo(logicV2.getAddress());
-
-    const price = ethers.parseEther("0.001");
-    expect(token.connect(alice).startVoting(price)).to.be.ok;
-    // expect(await token.votingActive()).to.be.true;
-  });
+  // task tests
 
   it("should change votingTimestamp, votingNumber with startVoting; emits VotingStarted", async function () {
     const price = ethers.parseEther("0.001");
@@ -113,7 +112,9 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
     const bobBalance = await token.balanceOf(bob.address);
     expect(bobBalance < threshold).to.be.true;
     console.log(`bob's balance: ${formatUnit(bobBalance)}`);
-    await expect(token.connect(bob).vote(price)).to.be.revertedWith("not enough tokens");
+    await expect(
+      token.connect(bob).vote(price)
+    ).to.be.revertedWithCustomError(token, "InsufficientVotingBalance").withArgs(threshold);
     console.log(`bob is below the threshold`);
 
     const transferAmount = threshold - bobBalance + 1n;
@@ -128,7 +129,7 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
     console.log(`bob voted successfully`);
   });
 
-  it("should prevent double-spending on voting", async function () {
+  it("should prevent double-spending on voting and transfers for voters", async function () {
     const price = ethers.parseEther("0.001");
 
     const aliceBalance = await token.balanceOf(alice.address);
@@ -138,12 +139,25 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
 
     const bobBalance = await token.balanceOf(bob.address);
     console.log(`bob's balance: ${formatUnit(bobBalance)} tokens`);
-    expect(token.connect(alice).startVoting(price)).to.be.revertedWith("voting is already active");
+    expect(token.connect(alice).startVoting(price)).to.be.revertedWithCustomError(token, "VotingActive");
     console.log(`bob's vote was reverted due to insufficient balance`);
 
-    const transferAmount = aliceBalance / 2n;
-    await expect(token.connect(alice).transfer(bob.address, transferAmount)).to.be.revertedWith("sender voted");
+    const aliceTransferAmount = aliceBalance / 2n;
+    await expect(
+      token.connect(alice).transfer(bob.address, aliceTransferAmount)
+    ).to.be.revertedWithCustomError(token, "VotingParticipation").withArgs(alice.address);
     console.log(`alice's transfer to bob was reverted due to voting participation`);
+
+    const bobTransferAmount = (await token.connect(bob).balanceOf(bob)) / 100n; // 1%
+    await expect(
+      token.connect(bob).transfer(alice.address, bobTransferAmount)
+    ).to.be.revertedWithCustomError(token, "VotingParticipation").withArgs(alice.address);
+
+    const decimals = await token.decimals();
+    const sellAmount = 10n**decimals / 1000n;
+    await expect(
+      token.connect(alice).sell(sellAmount)
+    ).to.be.revertedWithCustomError(token, "VotingParticipation").withArgs(alice.address);
   });
 
   it("allows buying and selling with sufficient ETH; emits Bought and Sold", async function () {
@@ -182,11 +196,11 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
     console.log(`bob's resulting balance: ${formatUnit(bobNewBalance)} tokens`);
   });
 
-  it("should burn fees weekly after fees accumulate (emit TradeFeesUpdated and FeesBurned)", async function () {
+  it("should burn fees weekly on admin's request; emits TradeFeesUpdated and FeesBurned)", async function () {
     await expect(token.connect(deployer).setTradeFees(100, 100)).to.emit(token, "TradeFeesUpdated");
     console.log(`deployer sets fees`);
 
-    const price = ethers.parseEther("0.0001");
+    const price = ethers.parseEther("0.001");
     await token.connect(alice).startVoting(price);
     console.log(`alice starts a voting for a price (${formatUnit(price)})`);
 
@@ -202,7 +216,11 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
     expect(feeBalance).to.be.gt(0);
     console.log(`contract's fee balance: ${formatUnit(feeBalance)}`);
 
-    await expect(token.connect(deployer).burnFees()).to.be.revertedWith("can burn only once per 7 days");
+    const feeBurnTimestamp = await token.feeBurnTimestamp();
+    const sevenDays = 7n * 24n * 60n * 60n;
+    await expect(
+      token.connect(deployer).burnFees()
+    ).to.be.revertedWithCustomError(token, "BurningCooldown").withArgs(feeBurnTimestamp + sevenDays);
     console.log(`deployer can't burns the fees as 7 days hasn't passed yet`);
 
     const travelTimeSeconds = 7 * 24 * 3600;
@@ -216,5 +234,106 @@ describe("VoteableTradeableChargeableToken (proxy)", function () {
     const newFeeBalance = await token.feeBalance();
     expect(newFeeBalance).to.equal(0);
     console.log(`contract's fee balance: ${formatUnit(newFeeBalance)}`);
+  });
+
+  // the rest of the tests
+
+  it("should upgrade", async function () {
+    const LogicV2Factory = await ethers.getContractFactory("VTCTokenUpgradeable");
+    const logicV2 = await LogicV2Factory.connect(deployer).deploy();
+    await logicV2.waitForDeployment();
+    await proxy.connect(deployer).upgradeTo(logicV2.getAddress());
+
+    const price = ethers.parseEther("0.001");
+    await expect(token.connect(alice).startVoting(price)).to.emit(token, "VotingStarted");
+    expect(await token.votingActive()).to.be.true;
+  });
+
+  it("allows a holder >= 0.1% supply to start voting and to cast initial vote", async function () {
+    const totalSupply = await token.totalSupply();
+    const votingBalanceThreshold = totalSupply / 1000n;
+
+    const aliceBalance = await token.balanceOf(alice.address);
+    expect(aliceBalance).to.be.gte(votingBalanceThreshold);
+
+    const price = ethers.parseEther("0.001");
+    await token.connect(alice).startVoting(price);
+
+    const votingActive = await token.votingActive();
+    expect(votingActive).to.equal(true);
+
+    const roundId = await token.currentVotingRoundId();
+    expect(roundId).to.equal(1);
+  });
+
+  it("ends voting after votingTimeout and sets currentPrice based on votes", async function () {
+    const priceA = ethers.parseEther("0.001");
+    const priceB = ethers.parseEther("0.002");
+
+    await token.connect(alice).startVoting(priceA);
+
+    await expect(token.connect(alice).vote(priceB)).to.be.revertedWithCustomError(token, "AlreadyVoted");
+
+    const totalSupply = await token.totalSupply();
+    const votingBalanceThreshold = totalSupply / 2000n;
+
+    await expect(
+      token.connect(bob).vote(priceB)
+    ).to.be.revertedWithCustomError(token, "InsufficientVotingBalance").withArgs(votingBalanceThreshold);
+
+    const transferAmount = (await token.totalSupply()) / 100n; // 1% of total supply
+    await token.connect(deployer).transfer(bob.address, transferAmount);
+    expect(await token.connect(bob).vote(priceB)).to.be.ok;
+
+    await ethers.provider.send("evm_increaseTime", [votingTimeoutSeconds]);
+    await ethers.provider.send("evm_mine", []);
+
+    // can't vote
+    await expect(
+      token.connect(carol).vote(priceB)
+    ).to.be.revertedWithCustomError(token, "InsufficientVotingBalance").withArgs(votingBalanceThreshold);
+    // but can end
+    await token.connect(carol).endVoting();
+
+    expect(await token.currentPrice()).to.be.eq(priceA);
+  });
+
+  it("allows buying tokens", async function () {
+    const price = ethers.parseEther("0.001");
+
+    await token.connect(deployer).startVoting(price);
+
+    await ethers.provider.send("evm_increaseTime", [votingTimeoutSeconds]);
+    await ethers.provider.send("evm_mine", []);
+    await token.endVoting();
+
+    const oldBalance = await token.balanceOf(bob.address);
+    await token.connect(bob).buy({ value: ethers.parseEther("0.01") });
+
+    const newBalance = await token.balanceOf(bob.address);
+    expect(newBalance).to.be.gt(oldBalance);
+  });
+
+  it("allows selling tokens when haven't voted and ETH present", async function () {
+    const price = ethers.parseEther("0.000000000000000001"); // 1 to 1 price
+
+    await token.connect(deployer).startVoting(price);
+
+    await ethers.provider.send("evm_increaseTime", [votingTimeoutSeconds]);
+    await ethers.provider.send("evm_mine", []);
+    await token.endVoting();
+
+    // send ETH to contract
+    await deployer.sendTransaction({ to: tokenContractAddress, value: ethers.parseEther("0.01") });
+
+    // transfer some tokens to sell
+    const sellAmount = price * 1000n;
+    await token.connect(deployer).transfer(carol.address, sellAmount);
+    const oldBalance = await token.balanceOf(carol.address);
+
+    // sell
+    await token.connect(carol).sell(sellAmount);
+    const newBalance = await token.balanceOf(carol.address);
+    expect(newBalance < oldBalance).to.be.true;
   });
 });

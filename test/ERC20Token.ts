@@ -1,12 +1,15 @@
 import { expect } from "chai";
 import { network } from "hardhat";
-import type { ERC20Token } from "../types/ethers-contracts/ERC20Token.js";
+import type { ERC20TokenUpgradeable } from "../types/ethers-contracts/ERC20TokenUpgradeable.ts";
+import type { UpgradeableProxy } from "../types/ethers-contracts/UpgradeableProxy.ts";
 
 const conn = await network.connect();
 const { ethers } = conn;
 
 describe("ERC20Token: IERC20 token implementation", function () {
-  let token: ERC20Token;
+  let token: ERC20TokenUpgradeable;
+  let tokenContractAddress: string;
+  let proxy: UpgradeableProxy;
   let deployer: any;
   let alice: any;
   let bob: any;
@@ -17,17 +20,26 @@ describe("ERC20Token: IERC20 token implementation", function () {
 
     [deployer, alice, bob] = await ethers.getSigners();
 
-    const Factory = await ethers.getContractFactory("ERC20Token");
-    token = (await Factory.deploy("Rock Paper Scissors Token", "RPS")) as ERC20Token;
-    await token.waitForDeployment();
+    // Upgradeable deployment
+    const LogicFactory = await ethers.getContractFactory("VTCTokenUpgradeable");
+    const logic = await LogicFactory.connect(deployer).deploy();
+    await logic.waitForDeployment();
+    const initializeData = LogicFactory.interface.encodeFunctionData(
+      "ERC20TokenInitialize",
+      [ "ERC20 Token", "ET"]
+    );
+    const ProxyFactory = await ethers.getContractFactory("UpgradeableProxy");
+    proxy = (await ProxyFactory.connect(deployer).deploy(logic.getAddress(), deployer.address, initializeData));
+    await proxy.waitForDeployment();
+    const proxyContractAddress = await proxy.getAddress();
+    token = LogicFactory.attach(proxyContractAddress);
+    tokenContractAddress = await token.getAddress();
   });
 
   afterEach(async () => {
     // revert snapshot to clean state
     await conn.provider.request({ method: "evm_revert", params: [snapshotId] });
   });
-
-  // TODO: expect().to.emit()
 
   it("mints tokens correctly", async () => {
     await token.mint(alice.address, ethers.parseEther("100"));
@@ -71,14 +83,14 @@ describe("ERC20Token: IERC20 token implementation", function () {
 
     await expect(
       token.connect(alice).burn(ethers.parseEther("10"))
-    ).to.be.revertedWith("burn exceeds balance");
+    ).to.be.revertedWithCustomError(token, "ERC20InsufficientBalance");
   });
 
   it("reverts when transfer amount exceeds balance", async () => {
     await token.mint(alice.address, ethers.parseEther("1"));
     await expect(
       token.connect(alice).transfer(bob.address, ethers.parseEther("2"))
-    ).to.be.revertedWith("insufficient balance");
+    ).to.be.revertedWithCustomError(token, "ERC20InsufficientBalance");
   });
 
   it("reverts when transferFrom exceeds allowance", async () => {
@@ -87,6 +99,6 @@ describe("ERC20Token: IERC20 token implementation", function () {
 
     await expect(
       token.connect(bob).transferFrom(alice.address, bob.address, ethers.parseEther("7"))
-    ).to.be.revertedWith("transfer exceeds allowance");
+    ).to.be.revertedWithCustomError(token, "ERC20InsufficientAllowance");
   });
 });

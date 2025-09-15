@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import "./ERC20Token.sol";
+import "./ERC20TokenUpgradeable.sol";
 import "./interfaces/IVoteable.sol";
 import "./interfaces/ITradeable.sol";
 import "./interfaces/IChargeable.sol";
 
-// TODO: deployment code
-// new UpgradeableProxy(address(implV1), msg.sender, abi.encodeWithSignature(
-//     "initialize(string,string,uint256,uint256)",
-//     "Rock Paper Scissors Token", "RPS", 3600, 10
-// ));
-
-/// @title VoteableTradeableChargeableToken
+/// @title VTC: Voteable Tradeable Chargeable Token
 /// @author
 /// @notice Implements IERC20, IBurnable, IMintable, IVoteable, IChargeable, ITradeable. Some methods are
 /// role-restricted. Trade burns fees.
@@ -20,30 +14,15 @@ import "./interfaces/IChargeable.sol";
 /// - Start voting threshold: 0.1% of `totalSupply`
 /// - Voting threshold to cast a vote: 0.05% of `totalSupply`
 /// - Votes are weighted by `balances[voter]`
-/// - Transfers / buy / sell are forbidden for addresses that have voted in current round.
-contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, IChargeable {
-    // --------------------
-    // initialization state
-    // --------------------
-
-    bool private _VoteableTradeableChargeableTokenInitialized;
-
-    // ---------------
-    // IVoteable types
-    // ---------------
-
-    struct VotingPriceWeightAccumulator {
-        uint256 roundId;
-        uint256 weight;
-    }
-
+/// - Transfers / buy / sell are forbidden for addresses that have voted in the current round.
+contract VTCTokenUpgradeable is Initializable, ERC20TokenUpgradeable, IVoteable, ITradeable, IChargeable {
     // ---------------
     // IVoteable state
     // ---------------
 
-    mapping(address => uint256) public voterToRound;
+    mapping(uint256 => mapping(address => bool)) votingRoundParticipation;
 
-    mapping(uint256 => VotingPriceWeightAccumulator) public priceToAccumulator;
+    mapping(uint256 => mapping(uint256 => uint256)) votingRoundOptionWeights;
 
     uint256 public votingWinnerWeight;
 
@@ -77,19 +56,6 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @notice A basis point (in 0.01 percents)
     uint256 public sellingFeeBasePoints;
 
-    // -------------------
-    // IVoteable modifiers
-    // -------------------
-
-    /// @dev Modifier to revert if `msg.sender` voted in the current round
-    modifier voteEmpty(address voter, string memory message) {
-        if (votingActive) {
-            bool noVoteThisRound = voterToRound[voter] != currentVotingRoundId;
-            require(noVoteThisRound, message);
-        }
-        _;
-    }
-
     // -----------
     // constructor
     // -----------
@@ -97,19 +63,11 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @param name_ The name of the token (e.g., "Rock Paper Scissors Token")
     /// @param symbol_ The symbol of the token (e.g., "RPS")
     /// @param votingTimeoutSeconds_ Seconds until price voting deactivates
-    function VoteableTradeableChargeableTokenInitialize(
-        string memory name_,
-        string memory symbol_,
-        uint256 votingTimeoutSeconds_
-    ) public {
-        require(!_VoteableTradeableChargeableTokenInitialized, "already initialized");
-
-        _VoteableTradeableChargeableTokenInitialized = true;
-
-        _ERC20TokenInitialize(name_, symbol_);
-
-        votingTimeoutSeconds = votingTimeoutSeconds_;
-        feeBurnTimestamp = block.timestamp;
+    function VTCTokenInitialize(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_)
+        public
+        initializer
+    {
+        __VTCToken__init(name_, symbol_, votingTimeoutSeconds_);
     }
 
     // ------------------
@@ -124,24 +82,26 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     // --------------------
 
     /// @inheritdoc IERC20
-    function transfer(address to, uint256 value)
-        public
-        override
-        voteEmpty(msg.sender, "sender voted")
-        voteEmpty(to, "recipient voted")
-        returns (bool)
-    {
+    function transfer(address to, uint256 value) public override returns (bool) {
+        if (votingActive) {
+            if (votingRoundParticipation[currentVotingRoundId][msg.sender]) {
+                revert VotingParticipation(msg.sender);
+            } else if (votingRoundParticipation[currentVotingRoundId][to]) {
+                revert VotingParticipation(to);
+            }
+        }
         return super.transfer(to, value);
     }
 
     /// @inheritdoc IERC20
-    function transferFrom(address from, address to, uint256 value)
-        public
-        override
-        voteEmpty(from, "issuer voted")
-        voteEmpty(to, "recipient voted")
-        returns (bool)
-    {
+    function transferFrom(address from, address to, uint256 value) public override returns (bool) {
+        if (votingActive) {
+            if (votingRoundParticipation[currentVotingRoundId][from]) {
+                revert VotingParticipation(from);
+            } else if (votingRoundParticipation[currentVotingRoundId][to]) {
+                revert VotingParticipation(to);
+            }
+        }
         return super.transferFrom(from, to, value);
     }
 
@@ -153,10 +113,14 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @dev Voter is deemed eligible to start by holding at least 0.1% of the token supply.
     /// @param price Price in wei per token units (10**decimals) of token unit per TOKEN.
     function startVoting(uint256 price) external {
-        require(!votingActive, "voting is already active");
+        if (votingActive) {
+            revert VotingActive();
+        }
 
         uint256 threshold = totalSupply / 1000; // 0.1% is 0.001
-        require(balances[msg.sender] >= threshold, "not enough tokens");
+        if (balances[msg.sender] < threshold) {
+            revert InsufficientVotingBalance(threshold);
+        }
 
         votingWinnerWeight = 0;
         votingWinnerPrice = 0;
@@ -173,11 +137,17 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @dev Voter is deemed eligible to vote by holding at least 0.05% of the token supply.
     /// Voting is available once per round and blocks the trade interface.
     /// @param price Price in wei per token units (10**decimals of token unit per TOKEN)
-    function vote(uint256 price) external voteEmpty(msg.sender, "already voted") {
-        require(votingActive, "no voting");
+    function vote(uint256 price) external {
+        if (!votingActive) {
+            revert VotingInactive();
+        } else if (votingRoundParticipation[currentVotingRoundId][msg.sender]) {
+            revert AlreadyVoted();
+        }
 
         uint256 threshold = totalSupply / 2000; // 0.05% is 0.0005
-        require(balances[msg.sender] >= threshold, "not enough tokens");
+        if (balances[msg.sender] < threshold) {
+            revert InsufficientVotingBalance(threshold);
+        }
 
         _castVote(msg.sender, price);
     }
@@ -186,8 +156,11 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @dev Can be called by anyone after `votingTimeoutSeconds` seconds since `votingTimestamp`.
     /// Emits a {VotingEnded} event with the selected price and total weight.
     function endVoting() external {
-        require(votingActive, "voting is not active");
-        require(block.timestamp >= votingTimestamp + votingTimeoutSeconds, "voting did not time out");
+        if (!votingActive) {
+            revert VotingInactive();
+        } else if (block.timestamp < votingTimestamp + votingTimeoutSeconds) {
+            revert VotingNotExpired(votingTimestamp + votingTimeoutSeconds);
+        }
 
         uint256 winnerWeight = votingWinnerWeight;
         uint256 winnerPrice = votingWinnerPrice;
@@ -206,10 +179,14 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// @notice Burn accumulated fee tokens.
     /// Emits a {FeesBurned} event.
     function burnFees() external onlyAdmins {
-        require(block.timestamp >= feeBurnTimestamp + 7 days, "can burn only once per 7 days");
+        if (block.timestamp < feeBurnTimestamp + 7 days) {
+            revert BurningCooldown(feeBurnTimestamp + 7 days);
+        }
 
         uint256 feeBalance_ = feeBalance;
-        require(feeBalance_ > 0, "fee balance is 0");
+        if (feeBalance_ == 0) {
+            revert ZeroBurningBalance();
+        }
 
         feeBalance = 0;
         _burn(address(this), feeBalance_);
@@ -236,9 +213,18 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// Voters cannot be buyers to prevent balance-weighted insider trading.
     /// Emits a {Bought} event.
     /// @dev `currentPrice` is in wei per token unit (10**decimals of token unit per TOKEN)
-    function buy() external payable voteEmpty(msg.sender, "sender voted") {
-        require(msg.value > 0, "insufficient payment");
-        require(currentPrice > 0, "price not set");
+    function buy() external payable {
+        if (votingActive) {
+            if (votingRoundParticipation[currentVotingRoundId][msg.sender]) {
+                revert VotingParticipation(msg.sender);
+            }
+        }
+        if (msg.value == 0) {
+            revert ZeroETHPayment();
+        }
+        if (currentPrice == 0) {
+            revert PriceNotSet();
+        }
 
         // wei/eth: 10**18
         // - suppose price or wei/tokenUnit is 10**14
@@ -262,9 +248,18 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     /// Voters cannot be sellers to prevent balance-weighted insider trading.
     /// Emits a {Sold} event.
     /// @param amount is in wei per token unit (10**decimals of token unit per TOKEN)
-    function sell(uint256 amount) external voteEmpty(msg.sender, "sender voted") {
-        require(amount > 0, "zero amount");
-        require(currentPrice > 0, "price not set");
+    function sell(uint256 amount) external {
+        if (votingActive) {
+            if (votingRoundParticipation[currentVotingRoundId][msg.sender]) {
+                revert VotingParticipation(msg.sender);
+            }
+        }
+        if (amount == 0) {
+            revert ZeroTokenPayment();
+        }
+        if (currentPrice == 0) {
+            revert PriceNotSet();
+        }
 
         _burn(msg.sender, amount);
         uint256 fee = (amount * sellingFeeBasePoints) / 10000;
@@ -280,7 +275,9 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
         // - suppose price or wei/tokenUnit is 10**22
         //   then per 1 token unit of TOKEN sold you get [10**4 or 10_000] wei of ETHEREUM
         uint256 ethAmount = (tokenSoldAmount * currentPrice) / (10 ** decimals);
-        require(address(this).balance >= ethAmount, "insufficient ETH");
+        if (address(this).balance < ethAmount) {
+            revert InsufficientETHTradeBalance();
+        }
 
         payable(msg.sender).transfer(ethAmount);
 
@@ -291,21 +288,24 @@ contract VoteableTradeableChargeableToken is ERC20Token, IVoteable, ITradeable, 
     // Internal functions
     // ------------------
 
+    function __VTCToken__init(string memory name_, string memory symbol_, uint256 votingTimeoutSeconds_) internal {
+        __AccessControl_init();
+        __ERC20Token_init(name_, symbol_);
+
+        votingTimeoutSeconds = votingTimeoutSeconds_;
+        feeBurnTimestamp = block.timestamp;
+    }
+
     /// @dev Records a vote in the current round.
     function _castVote(address voter, uint256 price) internal {
-        voterToRound[voter] = currentVotingRoundId;
+        votingRoundParticipation[currentVotingRoundId][voter] = true;
 
         uint256 weight = balances[voter];
-        if (priceToAccumulator[price].roundId != currentVotingRoundId) {
-            priceToAccumulator[price].weight = weight; // 0 + weight
-            priceToAccumulator[price].roundId = currentVotingRoundId;
-        } else {
-            priceToAccumulator[price].weight += weight;
-        }
+        uint256 newWeight = votingRoundOptionWeights[currentVotingRoundId][price] + weight;
+        votingRoundOptionWeights[currentVotingRoundId][price] = newWeight;
 
-        uint256 accumulatedWeight = priceToAccumulator[price].weight;
-        if (accumulatedWeight > votingWinnerWeight) {
-            votingWinnerWeight = accumulatedWeight;
+        if (newWeight > votingWinnerWeight) {
+            votingWinnerWeight = newWeight;
             votingWinnerPrice = price;
         }
 

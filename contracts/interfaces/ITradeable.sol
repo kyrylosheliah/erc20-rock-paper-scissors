@@ -8,6 +8,14 @@ interface ITradeable {
 
     event Sold(address indexed seller, uint256 tokensBurned, uint256 ethReturned);
 
+    error PriceNotSet();
+
+    error ZeroETHPayment();
+
+    error ZeroTokenPayment();
+
+    error InsufficientETHTradeBalance();
+
     /// @dev Sets fees basis points
     /// Emits a {FeesUpdated} event
     function setTradeFees(uint256 buyBP, uint256 sellBP) external;

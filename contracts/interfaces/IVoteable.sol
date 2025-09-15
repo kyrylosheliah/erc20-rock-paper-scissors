@@ -8,6 +8,18 @@ interface IVoteable {
 
     event VotingEnded(uint256 winningPrice, uint256 totalWeight, uint256 roundId);
 
+    error VotingActive();
+
+    error VotingInactive();
+
+    error VotingNotExpired(uint256 expirationTimestamp);
+
+    error AlreadyVoted();
+
+    error VotingParticipation(address account);
+
+    error InsufficientVotingBalance(uint256 threshold);
+
     /// @notice Start a new voting with an initial `price`
     function startVoting(uint256 price) external;
 
