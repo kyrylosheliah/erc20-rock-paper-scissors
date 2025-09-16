@@ -16,15 +16,18 @@ describe("VTCTokenUpgradeable", function () {
   let carol: any;
   let snapshotId: string;
 
-  const formatUnitValue = "eth";
-  function formatUnit_(value: any, unit: "eth" | "gwei" | "wei" = "eth") {
-    value = typeof value === "bigint" ? value : BigInt(value.toString());
-    if (unit === "wei") return value.toString();
-    if (unit === "gwei") return ethers.formatUnits(value, "gwei") + "E+9";
-    return ethers.formatEther(value) + "E+18";
-  }
   function formatUnit(value: any) {
-    return formatUnit_(value, formatUnitValue);
+    const units = "eth";
+    value = typeof value === "bigint" ? value : BigInt(value.toString());
+    let suffix = "";
+    if (units === "eth") {
+      value = ethers.formatEther(value);
+      suffix = "E+18";
+    } else if (units === "gwei") {
+      value = ethers.formatUnits(value, "gwei");
+      suffix = "E+9";
+    }
+    return value.toString() + suffix;
   }
 
   beforeEach(async function () {

@@ -49,13 +49,13 @@ contract VTCTokenUpgradeableTest is Test {
     }
 
     function formatUnit(uint256 value) public pure returns (string memory) {
-        bytes32 formatUnitValue = keccak256(bytes("eth"));
+        bytes32 units = keccak256(bytes("gwei"));
         uint256 formattedValue = 0;
         string memory suffix = "";
-        if (formatUnitValue == keccak256("gwei")) {
+        if (units == keccak256("gwei")) {
             formattedValue = value / 1e9;
             suffix = "E+9";
-        } else if (formatUnitValue == keccak256("eth")) {
+        } else if (units == keccak256("eth")) {
             formattedValue = value / 1e18;
             suffix = "E+18";
         } else {

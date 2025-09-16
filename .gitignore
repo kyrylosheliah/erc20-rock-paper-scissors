@@ -28,3 +28,6 @@
 /out
 # forge packages
 /lib
+
+# remix
+/.deps

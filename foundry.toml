@@ -4,7 +4,8 @@ out = "out"
 libs = ["lib"]
 test = "test-forge"
 remappings = [
-	"@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/",
+	"forge-std/=lib/forge-std/src/",
+	"@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
 	"@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/"
 ]
 ffi = true

@@ -35,33 +35,47 @@ contract VTCTokenUpgradeableDeploymentTest is Test {
         // console.log("Deployer's initial balance:", token.balanceOf(msg.sender));
     }
 
+    function formatUnit(uint256 value) public pure returns (string memory) {
+        bytes32 units = keccak256(bytes("eth"));
+        uint256 formattedValue = 0;
+        string memory suffix = "";
+        if (units == keccak256("gwei")) {
+            formattedValue = value / 1e9;
+            suffix = "E+9";
+        } else if (units == keccak256("eth")) {
+            formattedValue = value / 1e18;
+            suffix = "E+18";
+        } else {
+            formattedValue = value;
+        }
+        return string.concat(vm.toString(formattedValue), suffix);
+    }
+
     function testUpgrade() public {
+        console.log("=== rewriting upgrade ");
         VTCTokenUpgradeable logicV2 = new VTCTokenUpgradeable();
         token.upgradeToAndCall(payable(address(logicV2)), bytes(""));
-
-        console.log("balance of sender is ", token.balanceOf(msg.sender));
-        token.mint(msg.sender, 1500 ether);
-        console.log("balance of sender after minting is ", token.balanceOf(msg.sender));
+        console.log("sender balance:", formatUnit(token.balanceOf(msg.sender)));
+        // token.mint(msg.sender, 1500 ether);
+        VTCTokenUpgradeable(payable(address(proxy))).mint(msg.sender, 1500 ether);
+        console.log("sender balance after minting:", formatUnit(token.balanceOf(msg.sender)));
         assert(token.balanceOf(msg.sender) == 1500 ether);
-    }
 
-    function testDestructiveUpgrade() public {
+        console.log("=== destructive upgrade");
         VTCTokenUpgradeableDestroyer logicV3 = new VTCTokenUpgradeableDestroyer();
         token.upgradeToAndCall(payable(address(logicV3)), bytes(""));
-
-        console.log("balance of sender is ", token.balanceOf(msg.sender));
+        console.log("sender balance:", formatUnit(token.balanceOf(msg.sender)));
         VTCTokenUpgradeableDestroyer(payable(address(proxy))).makeRich(msg.sender);
-        console.log("balance of sender after making him rich is ", token.balanceOf(msg.sender));
+        console.log("sender balance after making him rich:", formatUnit(token.balanceOf(msg.sender)));
         assert(token.balanceOf(msg.sender) == 0 ether);
-    }
 
-    function testRestorationUpgrade() public {
+        console.log("=== restorative upgrade");
         VTCTokenUpgradeable logicV4 = new VTCTokenUpgradeable();
         token.upgradeToAndCall(payable(address(logicV4)), bytes(""));
-
-        console.log("balance of sender is ", token.balanceOf(msg.sender));
-        token.mint(msg.sender, 2000 ether);
-        console.log("balance of sender after minting is ", token.balanceOf(msg.sender));
+        console.log("sender balance:", formatUnit(token.balanceOf(msg.sender)));
+        // token.mint(msg.sender, 2000 ether);
+        VTCTokenUpgradeable(payable(address(proxy))).mint(msg.sender, 2000 ether);
+        console.log("sender balance after minting:", formatUnit(token.balanceOf(msg.sender)));
         assert(token.balanceOf(msg.sender) == 2000 ether);
     }
 }
