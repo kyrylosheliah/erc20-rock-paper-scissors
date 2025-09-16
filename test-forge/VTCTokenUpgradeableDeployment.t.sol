@@ -7,7 +7,7 @@ import "../contracts/VTCTokenUpgradeable.sol";
 import "../contracts/VTCTokenUpgradeableDestroyer.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-contract VTCTokenUpgradeableDeployTest is Test {
+contract VTCTokenUpgradeableDeploymentTest is Test {
     VTCTokenUpgradeable public token;
     ERC1967Proxy public proxy;
 
@@ -32,7 +32,7 @@ contract VTCTokenUpgradeableDeployTest is Test {
         token = VTCTokenUpgradeable(payable(address(proxy)));
 
         // token.mint(msg.sender, 1000 ether);
-        console.log("Deployer's initial balance:", token.balanceOf(msg.sender));
+        // console.log("Deployer's initial balance:", token.balanceOf(msg.sender));
     }
 
     function testUpgrade() public {

@@ -8,7 +8,6 @@ const { ethers } = conn;
 
 describe("VTCTokenUpgradeable", function () {
   let token: VTCTokenUpgradeable;
-  let tokenContractAddress: string;
   let proxy: UpgradeableProxy;
   let votingTimeoutSeconds: number;
   let deployer: any;
@@ -56,7 +55,13 @@ describe("VTCTokenUpgradeable", function () {
     await proxy.waitForDeployment();
     const proxyContractAddress = await proxy.getAddress();
     token = LogicFactory.attach(proxyContractAddress);
-    tokenContractAddress = await token.getAddress();
+
+    // send ETH to contract
+    const fundEthAmount = ethers.parseEther("1000");
+    const storageContractAddress = await proxy.getAddress();
+    await deployer.sendTransaction({ to: storageContractAddress, value: fundEthAmount });
+    // const storageBalance = await ethers.provider.getBalance(storageContractAddress);
+    // console.log("proxy (storage) contract balance is:", storageBalance);
 
     await token.connect(deployer).mint(deployer.address, ethers.parseEther("1000"));
     await token.connect(deployer).mint(alice.address, ethers.parseEther("1000"));
@@ -163,9 +168,6 @@ describe("VTCTokenUpgradeable", function () {
   it("allows buying and selling with sufficient ETH; emits Bought and Sold", async function () {
     const price = 1n; // 1 to 1
 
-    const fundEth = ethers.parseEther("0.05");
-    await deployer.sendTransaction({ to: tokenContractAddress, value: fundEth });
-
     await token.connect(alice).startVoting(price);
     console.log(`alice starts a voting for a price (${formatUnit(price)})`);
     await ethers.provider.send("evm_increaseTime", [votingTimeoutSeconds]);
@@ -190,7 +192,7 @@ describe("VTCTokenUpgradeable", function () {
     console.log(`bob's starting balance: ${formatUnit(bobOldBalance)} tokens`);
     const ethAmount = ethers.parseEther("0.001");
     await expect(token.connect(bob).buy({ value: ethAmount })).to.emit(token, "Bought");
-    console.log(`bob buys ${formatUnit(ethAmount)} in ETH`);
+    console.log("bob buys tokens for", formatUnit(ethAmount)," ETH");
     const bobNewBalance = await token.balanceOf(bob.address);
     expect(bobNewBalance).to.be.gt(bobOldBalance);
     console.log(`bob's resulting balance: ${formatUnit(bobNewBalance)} tokens`);
@@ -210,7 +212,7 @@ describe("VTCTokenUpgradeable", function () {
 
     const ethAmount = ethers.parseEther("1");
     await token.connect(bob).buy({ value: ethAmount });
-    console.log(`bob buys ${formatUnit(ethAmount)} in ETH`);
+    console.log("bob buys tokens for", formatUnit(ethAmount)," ETH");
 
     const feeBalance = await token.feeBalance();
     expect(feeBalance).to.be.gt(0);
@@ -243,10 +245,12 @@ describe("VTCTokenUpgradeable", function () {
     const logicV2 = await LogicV2Factory.connect(deployer).deploy();
     await logicV2.waitForDeployment();
     await proxy.connect(deployer).upgradeTo(logicV2.getAddress());
+    const proxyContractAddress = await proxy.getAddress();
+    const tokenV2 = LogicV2Factory.attach(proxyContractAddress);
 
     const price = ethers.parseEther("0.001");
-    await expect(token.connect(alice).startVoting(price)).to.emit(token, "VotingStarted");
-    expect(await token.votingActive()).to.be.true;
+    await expect(tokenV2.connect(alice).startVoting(price)).to.emit(tokenV2, "VotingStarted");
+    expect(await tokenV2.votingActive()).to.be.true;
   });
 
   it("allows a holder >= 0.1% supply to start voting and to cast initial vote", async function () {
@@ -315,16 +319,13 @@ describe("VTCTokenUpgradeable", function () {
   });
 
   it("allows selling tokens when haven't voted and ETH present", async function () {
-    const price = ethers.parseEther("0.000000000000000001"); // 1 to 1 price
+    const price = ethers.parseEther("1"); // 1 to 1 price
 
     await token.connect(deployer).startVoting(price);
 
     await ethers.provider.send("evm_increaseTime", [votingTimeoutSeconds]);
     await ethers.provider.send("evm_mine", []);
     await token.endVoting();
-
-    // send ETH to contract
-    await deployer.sendTransaction({ to: tokenContractAddress, value: ethers.parseEther("0.01") });
 
     // transfer some tokens to sell
     const sellAmount = price * 1000n;

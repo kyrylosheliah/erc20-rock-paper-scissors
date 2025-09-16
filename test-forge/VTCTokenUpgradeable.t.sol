@@ -48,8 +48,20 @@ contract VTCTokenUpgradeableTest is Test {
         vm.revertTo(snapshotId);
     }
 
-    function formatUnit(uint256 value) internal pure returns (string memory) {
-        return string(abi.encodePacked(vm.toString(value / 1e18), ".", vm.toString((value % 1e18) / 1e15), "E+18"));
+    function formatUnit(uint256 value) public pure returns (string memory) {
+        bytes32 formatUnitValue = keccak256(bytes("eth"));
+        uint256 formattedValue = 0;
+        string memory suffix = "";
+        if (formatUnitValue == keccak256("gwei")) {
+            formattedValue = value / 1e9;
+            suffix = "E+9";
+        } else if (formatUnitValue == keccak256("eth")) {
+            formattedValue = value / 1e18;
+            suffix = "E+18";
+        } else {
+            formattedValue = value;
+        }
+        return string.concat(vm.toString(formattedValue), suffix);
     }
 
     // task tests
@@ -61,17 +73,16 @@ contract VTCTokenUpgradeableTest is Test {
         vm.expectEmit(true, true, true, true);
         emit IVoteable.VotingStarted(alice, block.timestamp, 1);
         token.startVoting(price);
-
         console.log("alice starts a voting with", formatUnit(price));
 
         assertTrue(token.votingActive());
         uint256 roundId = token.currentVotingRoundId();
         assertEq(roundId, 1);
+        console.log("voting round:", roundId);
 
         uint256 votingTimestamp = token.votingTimestamp();
         assertGt(votingTimestamp, 0);
         console.log("voting timestamp:", votingTimestamp);
-        console.log("voting round:", roundId);
 
         uint256 totalSupply = token.totalSupply();
         console.log("totalSupply:", formatUnit(totalSupply));
@@ -80,13 +91,14 @@ contract VTCTokenUpgradeableTest is Test {
     function test_should_prevent_accounts_with_less_than_005_percent_ownership_from_voting_emits_Voted() public {
         uint256 totalSupply = token.totalSupply();
         console.log("totalSupply is", formatUnit(totalSupply));
+
         uint256 threshold = totalSupply / 2000; // 0.05%
         console.log("voting threshold is", formatUnit(threshold));
 
         uint256 aliceBalance = token.balanceOf(alice);
         console.log("alice's balance:", formatUnit(aliceBalance));
         assertGe(aliceBalance, threshold);
-        console.log("alice is above the threshold");
+        console.log("alice is above threshold");
 
         uint256 price = 0.001 ether;
 
@@ -97,9 +109,8 @@ contract VTCTokenUpgradeableTest is Test {
         console.log("alice starts a voting");
 
         uint256 bobBalance = token.balanceOf(bob);
-        assertTrue(bobBalance < threshold);
         console.log("bob's balance:", formatUnit(bobBalance));
-
+        assertTrue(bobBalance < threshold);
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSignature("InsufficientVotingBalance(uint256)", threshold));
         token.vote(price);
@@ -168,7 +179,6 @@ contract VTCTokenUpgradeableTest is Test {
         console.log("alice starts a voting for a price (", formatUnit(price), ")");
 
         vm.warp(block.timestamp + votingTimeoutSeconds);
-
         vm.prank(carol);
         token.endVoting();
         console.log("the voting ended");
@@ -201,10 +211,10 @@ contract VTCTokenUpgradeableTest is Test {
         uint256 tokenPurchasedAmount = sellTokensAmount - buyFeeAmount;
         vm.prank(bob);
         vm.expectEmit(true, true, true, true);
-        console.log(ethPaid, buyFeeAmount);
         emit ITradeable.Bought(bob, ethPaid, tokenPurchasedAmount);
         token.buy{value: ethPaid}();
-        console.log("bob buys", formatUnit(tokenPurchasedAmount), "of tokens for ETH");
+        console.log("bob buys", formatUnit(tokenPurchasedAmount), "tokens");
+        console.log("bob spends", formatUnit(ethPaid), " in ETH for tokens");
 
         uint256 bobNewBalance = token.balanceOf(bob);
         assertGt(bobNewBalance, bobOldBalance);
@@ -223,7 +233,6 @@ contract VTCTokenUpgradeableTest is Test {
         console.log("alice starts a voting for a price (", formatUnit(price), ")");
 
         vm.warp(block.timestamp + votingTimeoutSeconds);
-
         vm.prank(carol);
         token.endVoting();
 
@@ -231,7 +240,7 @@ contract VTCTokenUpgradeableTest is Test {
         vm.deal(bob, ethAmount);
         vm.prank(bob);
         token.buy{value: ethAmount}();
-        console.log("bob buys", formatUnit(ethAmount), "in ETH");
+        console.log("bob spends", formatUnit(ethAmount), " in ETH for tokens");
 
         uint256 feeBalance = token.feeBalance();
         assertGt(feeBalance, 0);
@@ -256,6 +265,8 @@ contract VTCTokenUpgradeableTest is Test {
         assertEq(newFeeBalance, 0);
         console.log("contract's fee balance:", formatUnit(newFeeBalance));
     }
+
+    // the rest of the tests
 
     function test_should_upgrade() public {
         VTCTokenUpgradeableDestroyer logicV2 = new VTCTokenUpgradeableDestroyer();
